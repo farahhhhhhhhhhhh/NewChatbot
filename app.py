@@ -1,29 +1,34 @@
 import streamlit as st
 from pypdf import PdfReader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
-from langchain_core.language_models.llms import LLM
+from langchain.llms.base import LLM
 from huggingface_hub import InferenceClient
 from typing import Optional, List, Any
+from pydantic import Field
 
-# Custom LLM wrapper
+# Custom LLM wrapper for HuggingFace
 class GemmaLLM(LLM):
-    client: Any = None
-    max_tokens: int = 500
+    client: Any = Field(default=None)
+    max_tokens: int = Field(default=500)
 
     @property
     def _llm_type(self) -> str:
         return "gemma_hf"
 
-    def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs) -> str:
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
         response = self.client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=self.max_tokens,
             temperature=0.2
         )
         return response.choices[0].message["content"]
+
+    @property
+    def _identifying_params(self):
+        return {"model": "gemma-2-2b-it"}
 
 @st.cache_resource
 def load_embeddings():
@@ -35,11 +40,11 @@ def setup_rag(_hf_token, pdf_path="ms1.pdf"):
     reader = PdfReader(pdf_path)
     text = "".join([page.extract_text() for page in reader.pages if page.extract_text()])
     
-    # Create chunks
+    # Create chunks using LangChain's text splitter
     splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=100)
     documents = splitter.create_documents([text])
     
-    # Create vectorstore
+    # Create FAISS vectorstore
     embeddings = load_embeddings()
     vectorstore = FAISS.from_documents(documents, embeddings)
     
@@ -47,9 +52,10 @@ def setup_rag(_hf_token, pdf_path="ms1.pdf"):
     client = InferenceClient(model="google/gemma-2-2b-it", token=_hf_token)
     llm = GemmaLLM(client=client)
     
-    # Create QA chain
+    # Create RetrievalQA chain
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
+        chain_type="stuff",
         retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
         return_source_documents=True
     )
