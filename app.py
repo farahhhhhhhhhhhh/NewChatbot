@@ -1,10 +1,10 @@
 import streamlit as st
 from pypdf import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
-from langchain.llms.base import LLM
+from langchain_core.language_models.llms import LLM
 from huggingface_hub import InferenceClient
 from typing import Optional, List, Any
 
@@ -17,7 +17,7 @@ class GemmaLLM(LLM):
     def _llm_type(self) -> str:
         return "gemma_hf"
 
-    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+    def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs) -> str:
         response = self.client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=self.max_tokens,
@@ -63,19 +63,23 @@ st.title("RAG Chatbot")
 hf_token = st.secrets.get("HF_TOKEN", None) or st.text_input("HuggingFace Token:", type="password")
 
 if hf_token:
-    qa_chain = setup_rag(hf_token)
-    
-    # Question input
-    question = st.text_input("Ask a question:")
-    
-    if st.button("Ask") and question:
-        result = qa_chain({"query": question})
+    try:
+        qa_chain = setup_rag(hf_token)
         
-        st.write("**Answer:**")
-        st.write(result['result'])
+        # Question input
+        question = st.text_input("Ask a question:")
         
-        st.write("**Sources:**")
-        for i, doc in enumerate(result['source_documents'], 1):
-            st.text_area(f"Chunk {i}", doc.page_content, height=100)
+        if st.button("Ask") and question:
+            with st.spinner("Thinking..."):
+                result = qa_chain({"query": question})
+                
+                st.write("**Answer:**")
+                st.write(result['result'])
+                
+                st.write("**Sources:**")
+                for i, doc in enumerate(result['source_documents'], 1):
+                    st.text_area(f"Chunk {i}", doc.page_content, height=100)
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
 else:
     st.info("Enter your HuggingFace token to start")
