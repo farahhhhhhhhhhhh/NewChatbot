@@ -1,17 +1,16 @@
 import streamlit as st
 from pypdf import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.llms.base import LLM
 from huggingface_hub import InferenceClient
 from typing import Optional, List, Any
-from pydantic import Field
 
 # Custom LLM wrapper
 class GemmaLLM(LLM):
-    client: Any = Field(...)
+    client: Any = None
     max_tokens: int = 500
 
     @property
@@ -60,8 +59,8 @@ def setup_rag(_hf_token, pdf_path="ms1.pdf"):
 # Main app
 st.title("RAG Chatbot")
 
-# Get HF token
-hf_token = st.text_input("HuggingFace Token:", type="password")
+# Get HF token from secrets or input
+hf_token = st.secrets.get("HF_TOKEN", None) or st.text_input("HuggingFace Token:", type="password")
 
 if hf_token:
     qa_chain = setup_rag(hf_token)
