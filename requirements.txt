@@ -1,8 +1,13 @@
 streamlit
 pypdf
 faiss-cpu
+
 langchain
 langchain-community
+langchain-core
 langchain-text-splitters
+langchain-huggingface
+langchain-experimental
+
 sentence-transformers
 huggingface_hub
