@@ -4,5 +4,10 @@ faiss-cpu
 sentence-transformers
 huggingface_hub
 
+# LangChain version with RetrievalQA
 langchain==0.1.20
 langchain-community==0.0.28
+
+# FORCE pydantic v1 for compatibility
+pydantic==1.10.13
+typing_extensions==4.8.0
