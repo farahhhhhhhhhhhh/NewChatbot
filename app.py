@@ -6,7 +6,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFaceHub
-from langchain.chains import RetrievalQA
+from langchain_community.chains import RetrievalQA
+
 
 # ----------------------------------------------------------
 # Streamlit UI
@@ -83,3 +84,4 @@ if st.button("Get Answer"):
                 st.write(f"**Chunk {i}:**")
                 st.write(doc.page_content)
                 st.write("---")
+
