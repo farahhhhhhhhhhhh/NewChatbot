@@ -1,0 +1,101 @@
+import streamlit as st
+from pypdf import PdfReader
+
+# LangChain imports
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.llms import HuggingFaceHub
+from langchain.chains import RetrievalQA
+
+# ----------------------------------------------------------
+# Streamlit UI
+# ----------------------------------------------------------
+st.title("📘 RAG Chatbot – Milestone 1 Helper")
+st.write("Ask any question about the MS1 Checklist PDF. The answer is generated using FAISS-based retrieval + Gemma LLM.")
+
+
+# ----------------------------------------------------------
+# 1. LOAD PDF
+# ----------------------------------------------------------
+def load_text(path):
+    reader = PdfReader(path)
+    text = ""
+    for page in reader.pages:
+        content = page.extract_text()
+        if content:
+            text += content + "\n"
+    return text
+
+
+pdf_text = load_text("ms1.pdf")
+
+
+# ----------------------------------------------------------
+# 2. SPLIT INTO CHUNKS
+# ----------------------------------------------------------
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=400,
+    chunk_overlap=100
+)
+
+chunks = splitter.split_text(pdf_text)
+
+
+# ----------------------------------------------------------
+# 3. EMBEDDINGS + VECTOR STORE (FAISS)
+# ----------------------------------------------------------
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+db = FAISS.from_texts(chunks, embeddings)
+retriever = db.as_retriever(search_kwargs={"k": 3})
+
+
+# ----------------------------------------------------------
+# 4. LLM CLIENT (Gemma 2B IT on HuggingFace)
+# ----------------------------------------------------------
+HF_TOKEN = st.secrets["HF_TOKEN"]
+
+llm = HuggingFaceHub(
+    repo_id="google/gemma-2-2b-it",
+    huggingfacehub_api_token=HF_TOKEN,
+    model_kwargs={
+        "temperature": 0.2,
+        "max_new_tokens": 350
+    }
+)
+
+
+# ----------------------------------------------------------
+# 5. RETRIEVAL QA CHAIN
+# ----------------------------------------------------------
+qa = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=retriever,
+    chain_type="stuff",
+    return_source_documents=True
+)
+
+
+# ----------------------------------------------------------
+# 6. STREAMLIT INTERFACE
+# ----------------------------------------------------------
+query = st.text_input("Enter your question about Milestone 1:")
+
+if st.button("Get Answer"):
+    if query.strip():
+        result = qa(query)
+
+        # Display answer
+        st.write("### ✅ Answer:")
+        st.write(result["result"])
+
+        # Display retrieved text chunks
+        st.write("---")
+        with st.expander("📄 Retrieved Source Chunks"):
+            for i, doc in enumerate(result["source_documents"], 1):
+                st.write(f"**Chunk {i}:**")
+                st.write(doc.page_content)
+                st.write("---")
