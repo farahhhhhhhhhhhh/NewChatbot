@@ -6,15 +6,17 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFaceHub
 
-# ✔ Correct RetrievalQA import for 2025
-from langchain.chains.retrieval import RetrievalQA
+# NEW imports (work on Streamlit Cloud)
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate
 
 
 # ----------------------------------------------------------
-# Streamlit UI
+# UI
 # ----------------------------------------------------------
 st.title("📘 RAG Chatbot – Milestone 1 Helper")
-st.write("Ask any question about the MS1 Checklist PDF. The answer is generated using FAISS-based retrieval + Gemma LLM.")
+st.write("Ask any question about the MS1 Checklist PDF!")
 
 
 # ----------------------------------------------------------
@@ -24,16 +26,16 @@ def load_text(path):
     reader = PdfReader(path)
     text = ""
     for page in reader.pages:
-        content = page.extract_text()
-        if content:
-            text += content + "\n"
+        c = page.extract_text()
+        if c:
+            text += c + "\n"
     return text
 
 pdf_text = load_text("ms1.pdf")
 
 
 # ----------------------------------------------------------
-# Split into chunks
+# Chunking
 # ----------------------------------------------------------
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=400,
@@ -45,12 +47,9 @@ chunks = splitter.split_text(pdf_text)
 # ----------------------------------------------------------
 # Embeddings + FAISS
 # ----------------------------------------------------------
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-db = FAISS.from_texts(chunks, embeddings)
-retriever = db.as_retriever(search_kwargs={"k": 3})
+emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+db = FAISS.from_texts(chunks, emb)
+retriever = db.as_retriever()
 
 
 # ----------------------------------------------------------
@@ -61,35 +60,42 @@ HF_TOKEN = st.secrets["HF_TOKEN"]
 llm = HuggingFaceHub(
     repo_id="google/gemma-2-2b-it",
     huggingfacehub_api_token=HF_TOKEN,
-    model_kwargs={"temperature": 0.2, "max_new_tokens": 350}
+    model_kwargs={"temperature": 0.1, "max_new_tokens": 350}
 )
 
 
 # ----------------------------------------------------------
-# Retrieval QA Chain
+# Build Retrieval Chain (NEW LC API)
 # ----------------------------------------------------------
-qa = RetrievalQA.from_chain_type(
-    llm=llm,
-    chain_type="stuff",
-    retriever=retriever,
-    return_source_documents=True
+prompt = ChatPromptTemplate.from_template(
+    """
+    You are a helpful assistant. Use ONLY the provided context to answer.
+
+    Context:
+    {context}
+
+    Question:
+    {input}
+    """
 )
 
+document_chain = create_stuff_documents_chain(llm, prompt)
+rag_chain = create_retrieval_chain(retriever, document_chain)
+
 
 # ----------------------------------------------------------
-# UI
+# Streamlit interaction
 # ----------------------------------------------------------
-query = st.text_input("Enter your question about Milestone 1:")
+query = st.text_input("Enter your question:")
 
 if st.button("Get Answer"):
     if query.strip():
-        result = qa(query)
+        response = rag_chain.invoke({"input": query})
 
         st.write("### ✅ Answer:")
-        st.write(result["result"])
+        st.write(response["answer"])
 
-        with st.expander("📄 Retrieved Source Chunks"):
-            for i, doc in enumerate(result["source_documents"], 1):
-                st.write(f"**Chunk {i}:**")
+        with st.expander("📄 Retrieved Chunks"):
+            for doc in response["context"]:
                 st.write(doc.page_content)
                 st.write("---")
