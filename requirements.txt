@@ -1,9 +1,8 @@
 streamlit
 pypdf
-sentence-transformers
 faiss-cpu
-huggingface-hub
+sentence-transformers
+huggingface_hub
+
 langchain==0.1.20
-langchain-community==0.0.38
-langchain-core==0.1.52
-pydantic==1.10.13
+langchain-community==0.0.28
