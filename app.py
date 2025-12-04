@@ -1,12 +1,13 @@
 import streamlit as st
 from pypdf import PdfReader
 
-# LangChain imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFaceHub
-from langchain_community.chains import RetrievalQA
+
+# ✔ Correct RetrievalQA import for 2025
+from langchain.chains.retrieval import RetrievalQA
 
 
 # ----------------------------------------------------------
@@ -15,8 +16,9 @@ from langchain_community.chains import RetrievalQA
 st.title("📘 RAG Chatbot – Milestone 1 Helper")
 st.write("Ask any question about the MS1 Checklist PDF. The answer is generated using FAISS-based retrieval + Gemma LLM.")
 
+
 # ----------------------------------------------------------
-# 1. Load PDF
+# Load PDF
 # ----------------------------------------------------------
 def load_text(path):
     reader = PdfReader(path)
@@ -29,8 +31,9 @@ def load_text(path):
 
 pdf_text = load_text("ms1.pdf")
 
+
 # ----------------------------------------------------------
-# 2. Split into chunks
+# Split into chunks
 # ----------------------------------------------------------
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=400,
@@ -38,15 +41,20 @@ splitter = RecursiveCharacterTextSplitter(
 )
 chunks = splitter.split_text(pdf_text)
 
+
 # ----------------------------------------------------------
-# 3. Embeddings + FAISS
+# Embeddings + FAISS
 # ----------------------------------------------------------
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
 db = FAISS.from_texts(chunks, embeddings)
 retriever = db.as_retriever(search_kwargs={"k": 3})
 
+
 # ----------------------------------------------------------
-# 4. LLM (Gemma 2B IT)
+# LLM (Gemma)
 # ----------------------------------------------------------
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
@@ -56,18 +64,20 @@ llm = HuggingFaceHub(
     model_kwargs={"temperature": 0.2, "max_new_tokens": 350}
 )
 
+
 # ----------------------------------------------------------
-# 5. Retrieval QA Chain
+# Retrieval QA Chain
 # ----------------------------------------------------------
 qa = RetrievalQA.from_chain_type(
     llm=llm,
-    retriever=retriever,
     chain_type="stuff",
+    retriever=retriever,
     return_source_documents=True
 )
 
+
 # ----------------------------------------------------------
-# 6. UI
+# UI
 # ----------------------------------------------------------
 query = st.text_input("Enter your question about Milestone 1:")
 
@@ -78,10 +88,8 @@ if st.button("Get Answer"):
         st.write("### ✅ Answer:")
         st.write(result["result"])
 
-        st.write("---")
         with st.expander("📄 Retrieved Source Chunks"):
             for i, doc in enumerate(result["source_documents"], 1):
                 st.write(f"**Chunk {i}:**")
                 st.write(doc.page_content)
                 st.write("---")
-
