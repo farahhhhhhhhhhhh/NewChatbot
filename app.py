@@ -1,101 +1,82 @@
 import streamlit as st
 from pypdf import PdfReader
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import HuggingFaceHub
+from langchain.chains import RetrievalQA
+from langchain.llms.base import LLM
+from huggingface_hub import InferenceClient
+from typing import Optional, List, Any
+from pydantic import Field
 
-# NEW imports (work on Streamlit Cloud)
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+# Custom LLM wrapper
+class GemmaLLM(LLM):
+    client: Any = Field(...)
+    max_tokens: int = 500
 
+    @property
+    def _llm_type(self) -> str:
+        return "gemma_hf"
 
-# ----------------------------------------------------------
-# UI
-# ----------------------------------------------------------
-st.title("📘 RAG Chatbot – Milestone 1 Helper")
-st.write("Ask any question about the MS1 Checklist PDF!")
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        response = self.client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=self.max_tokens,
+            temperature=0.2
+        )
+        return response.choices[0].message["content"]
 
+@st.cache_resource
+def load_embeddings():
+    return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# ----------------------------------------------------------
-# Load PDF
-# ----------------------------------------------------------
-def load_text(path):
-    reader = PdfReader(path)
-    text = ""
-    for page in reader.pages:
-        c = page.extract_text()
-        if c:
-            text += c + "\n"
-    return text
+@st.cache_resource
+def setup_rag(_hf_token, pdf_path="ms1.pdf"):
+    # Extract text from PDF
+    reader = PdfReader(pdf_path)
+    text = "".join([page.extract_text() for page in reader.pages if page.extract_text()])
+    
+    # Create chunks
+    splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=100)
+    documents = splitter.create_documents([text])
+    
+    # Create vectorstore
+    embeddings = load_embeddings()
+    vectorstore = FAISS.from_documents(documents, embeddings)
+    
+    # Setup LLM
+    client = InferenceClient(model="google/gemma-2-2b-it", token=_hf_token)
+    llm = GemmaLLM(client=client)
+    
+    # Create QA chain
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
+        return_source_documents=True
+    )
+    
+    return qa_chain
 
-pdf_text = load_text("ms1.pdf")
+# Main app
+st.title("RAG Chatbot")
 
+# Get HF token
+hf_token = st.text_input("HuggingFace Token:", type="password")
 
-# ----------------------------------------------------------
-# Chunking
-# ----------------------------------------------------------
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=400,
-    chunk_overlap=100
-)
-chunks = splitter.split_text(pdf_text)
-
-
-# ----------------------------------------------------------
-# Embeddings + FAISS
-# ----------------------------------------------------------
-emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-db = FAISS.from_texts(chunks, emb)
-retriever = db.as_retriever()
-
-
-# ----------------------------------------------------------
-# LLM (Gemma)
-# ----------------------------------------------------------
-HF_TOKEN = st.secrets["HF_TOKEN"]
-
-llm = HuggingFaceHub(
-    repo_id="google/gemma-2-2b-it",
-    huggingfacehub_api_token=HF_TOKEN,
-    model_kwargs={"temperature": 0.1, "max_new_tokens": 350}
-)
-
-
-# ----------------------------------------------------------
-# Build Retrieval Chain (NEW LC API)
-# ----------------------------------------------------------
-prompt = ChatPromptTemplate.from_template(
-    """
-    You are a helpful assistant. Use ONLY the provided context to answer.
-
-    Context:
-    {context}
-
-    Question:
-    {input}
-    """
-)
-
-document_chain = create_stuff_documents_chain(llm, prompt)
-rag_chain = create_retrieval_chain(retriever, document_chain)
-
-
-# ----------------------------------------------------------
-# Streamlit interaction
-# ----------------------------------------------------------
-query = st.text_input("Enter your question:")
-
-if st.button("Get Answer"):
-    if query.strip():
-        response = rag_chain.invoke({"input": query})
-
-        st.write("### ✅ Answer:")
-        st.write(response["answer"])
-
-        with st.expander("📄 Retrieved Chunks"):
-            for doc in response["context"]:
-                st.write(doc.page_content)
-                st.write("---")
+if hf_token:
+    qa_chain = setup_rag(hf_token)
+    
+    # Question input
+    question = st.text_input("Ask a question:")
+    
+    if st.button("Ask") and question:
+        result = qa_chain({"query": question})
+        
+        st.write("**Answer:**")
+        st.write(result['result'])
+        
+        st.write("**Sources:**")
+        for i, doc in enumerate(result['source_documents'], 1):
+            st.text_area(f"Chunk {i}", doc.page_content, height=100)
+else:
+    st.info("Enter your HuggingFace token to start")
