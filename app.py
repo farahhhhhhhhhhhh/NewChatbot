@@ -1,34 +1,26 @@
 import streamlit as st
 from pypdf import PdfReader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
-from langchain.llms.base import LLM
+from langchain_community.llms import HuggingFaceHub
 from huggingface_hub import InferenceClient
-from typing import Optional, List, Any
-from pydantic import Field
+from typing import Optional
 
-# Custom LLM wrapper for HuggingFace
-class GemmaLLM(LLM):
-    client: Any = Field(default=None)
-    max_tokens: int = Field(default=500)
-
-    @property
-    def _llm_type(self) -> str:
-        return "gemma_hf"
-
-    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+# Manual RAG implementation using LangChain components
+class CustomHFLLM:
+    def __init__(self, hf_token):
+        self.client = InferenceClient(model="google/gemma-2-2b-it", token=hf_token)
+    
+    def __call__(self, prompt):
         response = self.client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=self.max_tokens,
+            max_tokens=500,
             temperature=0.2
         )
         return response.choices[0].message["content"]
-
-    @property
-    def _identifying_params(self):
-        return {"model": "gemma-2-2b-it"}
 
 @st.cache_resource
 def load_embeddings():
@@ -44,23 +36,37 @@ def setup_rag(_hf_token, pdf_path="ms1.pdf"):
     splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=100)
     documents = splitter.create_documents([text])
     
-    # Create FAISS vectorstore
+    # Create FAISS vectorstore using LangChain
     embeddings = load_embeddings()
     vectorstore = FAISS.from_documents(documents, embeddings)
     
-    # Setup LLM
-    client = InferenceClient(model="google/gemma-2-2b-it", token=_hf_token)
-    llm = GemmaLLM(client=client)
+    # Create retriever
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
     
-    # Create RetrievalQA chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
-        return_source_documents=True
-    )
+    # Setup custom LLM
+    llm = CustomHFLLM(_hf_token)
     
-    return qa_chain
+    return retriever, llm
+
+def query_rag(question, retriever, llm):
+    # Retrieve relevant documents
+    docs = retriever.get_relevant_documents(question)
+    
+    # Build context
+    context = "\n\n".join([doc.page_content for doc in docs])
+    
+    # Build prompt for RetrievalQA-style interaction
+    prompt = f"""Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+{context}
+
+Question: {question}
+Answer:"""
+    
+    # Get answer from LLM
+    answer = llm(prompt)
+    
+    return answer, docs
 
 # Main app
 st.title("RAG Chatbot")
@@ -70,22 +76,23 @@ hf_token = st.secrets.get("HF_TOKEN", None) or st.text_input("HuggingFace Token:
 
 if hf_token:
     try:
-        qa_chain = setup_rag(hf_token)
+        retriever, llm = setup_rag(hf_token)
         
         # Question input
         question = st.text_input("Ask a question:")
         
         if st.button("Ask") and question:
             with st.spinner("Thinking..."):
-                result = qa_chain({"query": question})
+                answer, source_docs = query_rag(question, retriever, llm)
                 
                 st.write("**Answer:**")
-                st.write(result['result'])
+                st.write(answer)
                 
                 st.write("**Sources:**")
-                for i, doc in enumerate(result['source_documents'], 1):
+                for i, doc in enumerate(source_docs, 1):
                     st.text_area(f"Chunk {i}", doc.page_content, height=100)
     except Exception as e:
         st.error(f"Error: {str(e)}")
+        st.write("Full error details:", str(e))
 else:
     st.info("Enter your HuggingFace token to start")
